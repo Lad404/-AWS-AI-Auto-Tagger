@@ -19,6 +19,8 @@ This project eliminates manual tagging effort, improves compliance, and simplifi
 ---
 
 ## 🏗️ Architecture
+<img width="707" height="509" alt="image" src="https://github.com/user-attachments/assets/d372dc6d-3691-4602-a5ec-2525c3c5cb1a" />
+
 
 
 
