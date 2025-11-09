@@ -1,1 +1,243 @@
+import boto3
+import json
+import re
+
+# AWS Clients
+ec2 = boto3.client("ec2")
+s3 = boto3.client("s3")
+rds = boto3.client("rds")
+lambda_client = boto3.client("lambda")
+bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
+
+# Valid ON_DEMAND model in your account
+MODEL_ID = "openai.gpt-oss-20b-1:0"
+
+
+# -----------------------------
+# Helper: Extract JSON from model output
+# -----------------------------
+def extract_json_from_text(text: str):
+    if not text:
+        return None
+
+    # 1. Extract inside <json> ... </json> (if found)
+    wrapper_match = re.search(r"<json>(.*?)</json>", text, re.DOTALL)
+    if wrapper_match:
+        try:
+            return json.loads(wrapper_match.group(1).strip())
+        except Exception:
+            pass
+
+    # 2. Remove reasoning-style tags
+    cleaned = (
+        text.replace("<reasoning>", "")
+            .replace("</reasoning>", "")
+            .replace("```json", "")
+            .replace("```", "")
+            .strip()
+    )
+
+    # 3. Try direct JSON parse
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    # 4. Extract first {...} JSON object
+    brace_match = re.search(r"\{[\s\S]*\}", cleaned)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except Exception:
+            pass
+
+    return None
+
+
+# -----------------------------
+# Helper: Deterministic fallback tags from name
+# -----------------------------
+def deterministic_tags_from_name(name: str, availability_zone: str | None):
+    n = (name or "").lower()
+
+    # Environment detection
+    env_map = [
+        ("prod", "Production"),
+        ("production", "Production"),
+        ("stage", "Staging"),
+        ("staging", "Staging"),
+        ("uat", "UAT"),
+        ("test", "Test"),
+        ("dev", "Development"),
+        ("qa", "QA"),
+    ]
+    environment = next((label for token, label in env_map if token in n), None)
+
+    # Application detection
+    app_map = [
+        ("web", "Web"),
+        ("api", "API"),
+        ("db", "Database"),
+        ("auth", "Auth"),
+        ("etl", "ETL"),
+    ]
+    application = next((label for token, label in app_map if token in n), None)
+
+    # Region detection from name
+    region_match = re.search(r"(us|eu|ap|sa|me|af)-(east|west|north|south|central|southeast|northeast|southwest)-\d", n)
+    region = region_match.group(0) if region_match else None
+
+    # Fallback region from availability zone
+    if not region and availability_zone:
+        region = re.sub(r"[a-z]$", "", availability_zone)
+
+    # Final assembled fallback tags
+    tags = {
+        "Environment": environment or "Unknown",
+        "Application": application or "General",
+        "Region": region or "Unknown",
+        "Owner": "CloudTeam",
+        "CostCenter": "IT",
+        "Name": name,
+    }
+
+    return tags
+
+
+# -----------------------------
+# Helper: AI-based tag generation
+# -----------------------------
+def generate_tags_with_ai(resource_name: str, resource_type: str):
+    print(f"🔍 Generating AI tags for: {resource_name} ({resource_type})")
+
+    prompt = (
+        "Return ONLY JSON object of AWS resource tags. "
+        "No reasoning, no explanation.\n"
+        f"ResourceName: {resource_name}\n"
+        f"ResourceType: {resource_type}\n"
+        "Required keys: Environment, Application, Owner, CostCenter, Region, Name"
+    )
+
+    body = {
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 800,
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        response = bedrock.invoke_model(
+            modelId=MODEL_ID,
+            body=json.dumps(body)
+        )
+        result = json.loads(response["body"].read())
+
+        # OSS models return ChatCompletion style response
+        raw = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        print("🤖 AI raw content:", raw[:500])
+
+        tags = extract_json_from_text(raw)
+        if tags:
+            print("✅ AI tags parsed:", tags)
+        else:
+            print("⚠️ AI did not produce valid JSON")
+
+        return tags
+
+    except Exception as e:
+        print(f"❌ Bedrock Error: {e}")
+        return None
+
+
+# -----------------------------
+# Main handler
+# -----------------------------
+def lambda_handler(event, context):
+    print("🚀 Multi-resource Tagging Lambda started")
+
+    # -----------------------------
+    # Handle EC2
+    # -----------------------------
+    try:
+        ec2_desc = ec2.describe_instances()
+        for reservation in ec2_desc.get("Reservations", []):
+            for instance in reservation.get("Instances", []):
+                instance_id = instance["InstanceId"]
+                name = next((t["Value"] for t in instance.get("Tags", [])
+                             if t["Key"] == "Name"), instance_id)
+                az = instance.get("Placement", {}).get("AvailabilityZone")
+
+                print(f"📌 EC2 -> {instance_id} ({name})")
+
+                tags = generate_tags_with_ai(name, "EC2Instance") or deterministic_tags_from_name(name, az)
+
+                ec2.create_tags(Resources=[instance_id],
+                                Tags=[{"Key": k, "Value": str(v)} for k, v in tags.items()])
+                print(f"✅ Applied EC2 tags: {tags}")
+    except Exception as e:
+        print("❌ EC2 Error:", e)
+
+    # -----------------------------
+    # Handle S3
+    # -----------------------------
+    try:
+        buckets = s3.list_buckets().get("Buckets", [])
+        for bucket in buckets:
+            bname = bucket["Name"]
+            print(f"📌 S3 -> {bname}")
+
+            tags = generate_tags_with_ai(bname, "S3Bucket") or deterministic_tags_from_name(bname, None)
+
+            s3.put_bucket_tagging(
+                Bucket=bname,
+                Tagging={"TagSet": [{"Key": k, "Value": str(v)} for k, v in tags.items()]}
+            )
+            print(f"✅ Applied S3 tags: {tags}")
+    except Exception as e:
+        print("❌ S3 Error:", e)
+
+    # -----------------------------
+    # Handle RDS
+    # -----------------------------
+    try:
+        rds_list = rds.describe_db_instances().get("DBInstances", [])
+        for db in rds_list:
+            name = db["DBInstanceIdentifier"]
+            arn = db["DBInstanceArn"]
+            print(f"📌 RDS -> {name}")
+
+            tags = generate_tags_with_ai(name, "RDSInstance") or deterministic_tags_from_name(name, None)
+
+            rds.add_tags_to_resource(
+                ResourceName=arn,
+                Tags=[{"Key": k, "Value": str(v)} for k, v in tags.items()]
+            )
+            print(f"✅ Applied RDS tags: {tags}")
+    except Exception as e:
+        print("❌ RDS Error:", e)
+
+    # -----------------------------
+    # Handle Lambda Functions
+    # -----------------------------
+    try:
+        paginator = lambda_client.get_paginator("list_functions")
+        for page in paginator.paginate():
+            for fn in page.get("Functions", []):
+                fname = fn["FunctionName"]
+                arn = fn["FunctionArn"]
+                print(f"📌 Lambda -> {fname}")
+
+                tags = generate_tags_with_ai(fname, "LambdaFunction") or deterministic_tags_from_name(fname, None)
+
+                lambda_client.tag_resource(
+                    Resource=arn,
+                    Tags={k: str(v) for k, v in tags.items()}
+                )
+                print(f"✅ Applied Lambda tags: {tags}")
+    except Exception as e:
+        print("❌ Lambda Error:", e)
+
+    print("🏁 Tagging completed successfully")
+    return {"status": "OK"}
 
