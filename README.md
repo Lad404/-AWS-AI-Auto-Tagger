@@ -21,6 +21,38 @@ This project eliminates manual tagging effort, improves compliance, and simplifi
 ## 🏗️ Architecture
 <img width="707" height="509" alt="image" src="https://github.com/user-attachments/assets/d372dc6d-3691-4602-a5ec-2525c3c5cb1a" />
 
+Architecture Description
+
+EventBridge Scheduler triggers a Lambda function at a fixed interval.
+The Lambda function:
+
+Uses Boto3 to list EC2 instances and S3 buckets
+
+Calls Amazon Bedrock with a supported model (openai.gpt-oss-20b-1:0)
+
+Parses or builds tag dictionaries
+
+Applies tags using EC2 CreateTags, S3 PutBucketTagging, and Lambda TagResource
+
+Components Used
+
+AWS Lambda with Python runtime
+
+Amazon Bedrock Runtime
+
+Amazon EC2
+
+Amazon S3
+
+AWS EventBridge
+
+Boto3 SDK
+
+IAM roles and policies
+
+
+
+
 
 
 
