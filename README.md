@@ -35,7 +35,7 @@ CloudWatch (logging and monitoring)
 
 EC2 + S3 sample resources
 
-🔐 IAM Permissions Needed
+# 🔐 IAM Permissions Needed
 
 The Lambda execution role must include:
 
@@ -47,7 +47,7 @@ Bedrock: InvokeModel
 
 CloudWatch logs
 
-⚠️ Errors Experienced & Resolutions
+# ⚠️ Errors Experienced & Resolutions
 
 During development, multiple issues were encountered.
 Here is a full breakdown:
@@ -92,7 +92,7 @@ Cause: Lambda role lacked lambda:ListFunctions
 
 Fix: Remove Lambda scanning entirely to avoid unnecessary permissions
 
-🧪 Testing the System
+# 🧪 Testing the System
 Manual Test from Lambda Console
 
 Go to Lambda → Select your function
@@ -116,7 +116,7 @@ AI generating tags
 
 Tags applied
 
-🔄 Automatic Tagging via EventBridge
+# 🔄 Automatic Tagging via EventBridge
 
 Open EventBridge → Rules
 
