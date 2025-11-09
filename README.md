@@ -47,50 +47,50 @@ Bedrock: InvokeModel
 
 CloudWatch logs
 
-# ⚠️ Errors Experienced & Resolutions
 
-During development, multiple issues were encountered.
-Here is a full breakdown:
+# 🐞 Known Issues & Fixes
+## ❌ max_tokens_to_sample required
 
-Bedrock Model Errors
+Cause: Used Anthropic legacy API
 
-DeploymentNotFound / 403 Access Errors
+✅ Fix: Use Messages API
 
-Cause: Using Azure-style API endpoints or keys
+## ❌ "prompt must start with Human:"
 
-Fix: Use AWS Bedrock runtime client with correct region
+Cause: Using Anthropic older model
 
-Model does not support ON_DEMAND
+✅ Fix: Switched to openai.gpt-oss-20b-1:0
 
-Cause: Attempting to use Claude Sonnet models requiring inference profiles
+## ❌ Deployment not supported / Inference Profile required
 
-Fix: Switched to openai.gpt-oss-20b-1:0 with ON_DEMAND support
+Cause: Claude requires inference profiles
 
-Invalid JSON from AI
+✅ Fix: Use supported ON_DEMAND model
 
-Cause: Model includes reasoning in output
+## ❌ JSON parse errors
 
-Fix: Add strict JSON extraction logic + fallback deterministic tags
+Model produced:
 
-Unknown character or weird output
+<reasoning> ... </reasoning>
 
-Cause: OSS model returning additional tags
 
-Fix: Use regex or safe parser before JSON decode
+✅ Fix: Strip <reasoning> tokens
+✅ Clean output before parsing
 
-Lambda Errors
+## ❌ AccessDeniedException
 
-Timeout
+Cause: Missing IAM permissions
 
-Cause: Slow Bedrock API responses
+✅ Fix: Add IAM actions for
 
-Fix: Increase timeout to 30 seconds
+EC2
 
-AccessDenied when listing Lambda functions
+S3
 
-Cause: Lambda role lacked lambda:ListFunctions
+Lambda
 
-Fix: Remove Lambda scanning entirely to avoid unnecessary permissions
+Bedrock
+
 
 # 🧪 Testing the System
 Manual Test from Lambda Console
@@ -128,6 +128,24 @@ Cron expression: rate(5 minutes)
 
 Target: Lambda function
 
+
+# 📈 Future Enhancements
+
+Add RDS, DynamoDB, EKS resource tagging
+
+Include billing tags like:
+
+BusinessUnit
+
+OwnerEmail
+
+EnvironmentTier
+
+Store tagging logs in DynamoDB
+
+Send notifications to Slack/SNS
+
+Auto-remediation for missing tags
 
 
 
